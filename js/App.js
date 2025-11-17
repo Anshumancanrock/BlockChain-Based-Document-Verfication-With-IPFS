@@ -1,9 +1,13 @@
-//Your IPFS api key in ifura.io
+//Pinata IPFS Configuration
+//Get your free API key from https://app.pinata.cloud/
+const PINATA_API_KEY = "2165ffc44fa0be52e30c";
+const PINATA_SECRET_KEY = "28bb0c2008b62a7fab63925f2e881ff8e3c4693b01842ce5b62f59c0ebe64e16";
+
+//Legacy Infura credentials (no longer working - Infura IPFS deprecated)
 const projectId = "28LuNAotbXzcvtpOcE9F8ayKOeP";
-//Your api secret in ifura.io
 const projectSecret = "3de3d9c099c6c0c168e39b8bc03e2f7a";
 window.CONTRACT = {
-  address: "Contarct Address after deploying it via Remix Online IDE",
+  address: "0x63bcfD42aEAad82Bf5E1Db24D4a5BC7c9Ce5dF8E",
   network: "Example : https://polygon-rpc.com/",
   explore: "Example : https://polygonscan.com/",
   // Your Contract ABI
@@ -547,76 +551,107 @@ async function getFilebinInfo(filebinUrl, filebinId) {
 }
 
 async function uploadFileToIpfs() {
-  const fileInput = document.getElementById("doc-file"); // Assuming you have an input element with id 'doc-file' for selecting files
+  const fileInput = document.getElementById("doc-file");
+  
+  if (!fileInput || !fileInput.files || !fileInput.files[0]) {
+    throw new Error("No file selected");
+  }
+  
   const file = fileInput.files[0];
   const formData = new FormData();
   formData.append("file", file);
 
-  //for authinticating your request to infura.io
-  const auth = "Basic " + btoa(`${projectId}:${projectSecret}`);
-
   try {
-    //make post request to upload the file and get the CID
-    const response = await fetch("https://ipfs.infura.io:5001/api/v0/add", {
+    // Using Pinata IPFS service (free and reliable)
+    // Get your API keys from https://app.pinata.cloud/
+    const response = await fetch("https://api.pinata.cloud/pinning/pinFileToIPFS", {
       method: "POST",
       body: formData,
       headers: {
-        Authorization: auth,
+        'pinata_api_key': PINATA_API_KEY,
+        'pinata_secret_api_key': PINATA_SECRET_KEY
       },
     });
 
     if (!response.ok) {
-      throw new Error("File upload failed");
+      const errorText = await response.text();
+      console.error("IPFS upload error:", errorText);
+      
+      if (response.status === 401) {
+        throw new Error("Invalid Pinata API credentials. Please check your API keys at https://app.pinata.cloud/");
+      }
+      
+      throw new Error(`File upload failed: ${response.status} ${response.statusText}`);
     }
 
     const data = await response.json();
-    console.log(data["Hash"]); // Response data
-    //return the CID to the addDocHash to store it in the Contract
-    return data["Hash"];
+    console.log("IPFS CID:", data.IpfsHash);
+    
+    if (!data.IpfsHash) {
+      throw new Error("No CID returned from IPFS");
+    }
+    
+    //return the CID (Pinata returns it as IpfsHash)
+    return data.IpfsHash;
   } catch (error) {
-    console.error("Error uploading file:", error);
+    console.error("Error uploading file to IPFS:", error);
     throw error;
   }
 }
 
 async function sendHash() {
-  $("#loader").removeClass("d-none");
-  $("#upload_file_button").slideUp();
-  $("#note").html(
-    `<h5 class="text-info">Please confirm the transaction 🙂</h5>`
-  );
-  $("#upload_file_button").attr("disabled", true);
-  get_ChainID();
-  // Initilize Ipfs
-  // https://api.pdfrest.com/resource/21c2cbf2d-eb79-4eef-be3e-303b98d26f8c?format=url
-  // https://api.pdfrest.com/resource/2ff49040b-a696-44ce-a705-1c1ca69d51c8?format=url
-  // =================================================
-  // await getFilebinInfo();
-  // await uploadFileToBin();
-  const CID = await uploadFileToIpfs();
-  await uploadFileToIpfs();
-  if (window.hashedfile.length > 4) {
-    await window.contract.methods
-      .addDocHash(window.hashedfile, CID)
-      .send({ from: window.userAddress })
-      .on("transactionHash", function (_hash) {
-        $("#note").html(
-          `<h5 class="text-info p-1 text-center">Please wait for transaction to be mined...</h5>`
-        );
-      })
-
-      .on("receipt", function (receipt) {
-        printUploadInfo(receipt);
-        generateQRCode();
-      })
-
-      .on("confirmation", function (confirmationNr) {})
-      .on("error", function (error) {
-        console.log(error.message);
-        $("#note").html(`<h5 class="text-center">${error.message} 😏</h5>`);
-        $("#loader").addClass("d-none");
-        $("#upload_file_button").slideDown();
-      });
+  try {
+    $("#loader").removeClass("d-none");
+    $("#upload_file_button").slideUp();
+    $("#note").html(
+      `<h5 class="text-info">Uploading file to IPFS 📤...</h5>`
+    );
+    $("#upload_file_button").attr("disabled", true);
+    get_ChainID();
+    
+    // Upload file to IPFS first
+    const CID = await uploadFileToIpfs();
+    
+    if (!CID) {
+      throw new Error("Failed to upload file to IPFS");
+    }
+    
+    console.log("File uploaded to IPFS with CID:", CID);
+    
+    if (window.hashedfile && window.hashedfile.length > 4) {
+      $("#note").html(
+        `<h5 class="text-info">Please confirm the transaction 🙂</h5>`
+      );
+      
+      await window.contract.methods
+        .addDocHash(window.hashedfile, CID)
+        .send({ from: window.userAddress })
+        .on("transactionHash", function (_hash) {
+          $("#note").html(
+            `<h5 class="text-info p-1 text-center">Please wait for transaction to be mined...</h5>`
+          );
+        })
+        .on("receipt", function (receipt) {
+          printUploadInfo(receipt);
+          generateQRCode();
+        })
+        .on("confirmation", function (confirmationNr) {})
+        .on("error", function (error) {
+          console.log(error.message);
+          $("#note").html(`<h5 class="text-center">${error.message} 😏</h5>`);
+          $("#loader").addClass("d-none");
+          $("#upload_file_button").slideDown();
+          $("#upload_file_button").attr("disabled", false);
+        });
+    } else {
+      throw new Error("Invalid document hash");
+    }
+  } catch (error) {
+    console.error("Error in sendHash:", error);
+    $("#note").html(`<h5 class="text-center text-danger">${error.message} 😏</h5>`);
+    $("#loader").addClass("d-none");
+    $("#upload_file_button").slideDown();
+    $("#upload_file_button").attr("disabled", false);
   }
 }
 
